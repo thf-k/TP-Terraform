@@ -1,0 +1,104 @@
+- name: Installer WordPress sur Ubuntu (Apache/PHP/MariaDB)
+  hosts: wordpress
+  become: true
+
+  vars:
+    wp_db_name: wordpress
+    wp_db_user: wpuser
+    wp_db_pass: "WpPassw0rd!"
+    wp_path: /var/www/html
+
+  tasks:
+    - name: Mettre à jour le cache APT
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Installer paquets nécessaires
+      apt:
+        name:
+          - apache2
+          - mariadb-server
+          - php
+          - libapache2-mod-php
+          - php-mysql
+          - php-curl
+          - php-gd
+          - php-mbstring
+          - php-xml
+          - php-zip
+          - unzip
+          - curl
+          - rsync
+          - python3-pymysql
+        state: present
+
+    - name: Démarrer et activer Apache + MariaDB
+      service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - apache2
+        - mariadb
+
+    - name: Créer la base WordPress
+      community.mysql.mysql_db:
+        name: "{{ wp_db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Créer l'utilisateur DB WordPress + droits
+      community.mysql.mysql_user:
+        name: "{{ wp_db_user }}"
+        password: "{{ wp_db_pass }}"
+        priv: "{{ wp_db_name }}.*:ALL"
+        host: "localhost"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Télécharger WordPress
+      get_url:
+        url: https://wordpress.org/latest.zip
+        dest: /tmp/wordpress.zip
+        mode: "0644"
+
+    - name: Décompresser WordPress
+      unarchive:
+        src: /tmp/wordpress.zip
+        dest: /tmp
+        remote_src: yes
+
+    - name: Copier WordPress dans /var/www/html (si pas déjà installé)
+      command: rsync -a /tmp/wordpress/ "{{ wp_path }}/"
+      args:
+        creates: "{{ wp_path }}/wp-settings.php"
+
+    - name: Configurer wp-config.php
+      copy:
+        dest: "{{ wp_path }}/wp-config.php"
+        mode: "0644"
+        content: |
+          <?php
+          define('DB_NAME', '{{ wp_db_name }}');
+          define('DB_USER', '{{ wp_db_user }}');
+          define('DB_PASSWORD', '{{ wp_db_pass }}');
+          define('DB_HOST', 'localhost');
+          define('DB_CHARSET', 'utf8');
+          define('DB_COLLATE', '');
+          $table_prefix = 'wp_';
+          define('WP_DEBUG', false);
+          if ( !defined('ABSPATH') )
+            define('ABSPATH', dirname(__FILE__) . '/');
+          require_once(ABSPATH . 'wp-settings.php');
+
+    - name: Donner les droits à www-data
+      file:
+        path: "{{ wp_path }}"
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: Message fin
+      debug:
+        msg: "OK: WordPress installé. Ouvre http://192.168.56.10 dans ton navigateur Windows."
